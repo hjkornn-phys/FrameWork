@@ -1,5 +1,6 @@
 import numpy as np
-from Loss import MSE
+from Loss import MSE, CrossEntropy
+from Optimizer import GradientDescent, Momentum, XavierNormal
 
 
 class Layer:
@@ -135,24 +136,24 @@ class BatchNormalization(Layer):
     def _forward(self, x, training=True):
         epsilon = 1e-7
         if training:
-            batch_mean = np.mean(x, axis=0, keepdims=True)
-            batch_var = np.var(x, axis=0, keepdims=True)
+            batch_mean = np.mean(x, axis=0, keepdims=False)
+            batch_var = np.var(x, axis=0, keepdims=False)
             sqrtvar = (batch_var + epsilon) ** (1 / 2)
             xmu = x - batch_mean
             xhat = xmu / sqrtvar
             y = self.gamma * xhat + self.beta
             self.cache_update = (batch_mean, batch_var)
-            self.cahce_backward = (xhat, xmu, sqrtvar)
+            self.cache_backward = (xhat, xmu, sqrtvar)
             return y
         xmu = x - self.mean
         sqrtvar = (self.var + epsilon) ** (1 / 2)
         xhat = xmu / sqrtvar
-        y = self.gamma * xhat + self.beta
+        y = np.mean(self.gamma, axis=0) * xhat + np.mean(self.beta, axis=0)
         return y
 
     def _backward(self, grad):
         N, D = self.inputs.shape
-        xhat, xmu, sqrtvar = self.cahce_backward
+        xhat, xmu, sqrtvar = self.cache_backward
         grad_beta = grad  # (N, D)
         # grad_beta = np.sum(grad, axis=0, keepdims=True)  # (D,)
         g_gammaxhat = grad  # (N, D)
@@ -178,7 +179,9 @@ class BatchNormalization(Layer):
         self.beta -= grad_beta
 
         N, D = self.inputs.shape
-        if (self.mean == None) or (self.var == None):
+        if (not isinstance(self.mean, np.ndarray)) or (
+            not isinstance(self.var, np.ndarray)
+        ):
             self.mean = np.zeros(D)  # input shape = (N, D).  D dim
             self.var = np.zeros(D)
         assert self.mean.shape == self.var.shape
@@ -231,10 +234,9 @@ class Perceptron(Layer):
 
 
 class Model(Layer):
-    def __init__(self, lr=1e-3):
+    def __init__(self):
         super().__init__()
         self.layers = []
-        self.lr = lr
         self.loss = None
         self.optimizer = None
 
@@ -255,7 +257,7 @@ class Model(Layer):
     def evaluate(self, x, y):
         if self.loss is None:
             return None
-        return np.sum(self.loss.forward(y, self.forward(x))) / x.shape[0]
+        return np.sum(self.loss.forward(y, self.predict(x))) / x.shape[0]
 
     def _backward(self, grad):
         grads = []
